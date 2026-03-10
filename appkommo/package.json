@@ -1,0 +1,15 @@
+{
+  "name": "appkommo",
+  "version": "1.0.0",
+  "description": "Vercel Serverless Function para procesar Webhooks de Kommo CRM y enviar correos usando Microsoft Graph API",
+  "main": "api/webhook.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "@azure/msal-node": "^2.6.4"
+  },
+  "engines": {
+    "node": ">=18.x"
+  }
+}
