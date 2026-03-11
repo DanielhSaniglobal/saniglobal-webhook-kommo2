@@ -1,29 +1,27 @@
 const { ConfidentialClientApplication } = require('@azure/msal-node');
 
-// Función maestra: lee los datos así vengan estructurados o aplastados por Kommo
 function getFieldValue(body, fieldName, isName = false) {
     if (isName) {
-        // Buscar el nombre del cliente
+        // Aquí jalamos el nombre principal del cliente (Desde arriba de la tarjeta)
         if (body.leads?.status?.[0]?.name) return body.leads.status[0].name;
         if (body.leads?.update?.[0]?.name) return body.leads.update[0].name;
         if (body.leads?.add?.[0]?.name) return body.leads.add[0].name;
         
-        // Buscar en formato aplastado
         for (const key in body) {
-            if (key.match(/^leads\[(status|update|add)\]\[0\]\[name\]$/)) {
-                return body[key];
-            }
+            // Busca el título principal del Lead en formato aplastado
+            if (key.match(/^leads\[(status|update|add)\]\[0\]\[name\]$/)) return body[key];
+            // Por si acaso Kommo lo manda como contacto asociado
+            if (key.match(/^contacts\[(add|update)\]\[0\]\[name\]$/)) return body[key];
         }
         return 'Cliente sin nombre';
     }
 
     const targetName = fieldName.toLowerCase().trim();
 
-    // 1. Intentar buscar en formato aplastado (El formato rebelde de Kommo)
     for (const key in body) {
         if (key.includes('[custom_fields]') && key.endsWith('[name]')) {
             if (String(body[key]).toLowerCase().trim() === targetName) {
-                const basePath = key.substring(0, key.length - 6); // Quita el '[name]'
+                const basePath = key.substring(0, key.length - 6);
                 const val = body[basePath + '[values][0][value]'];
                 const enumVal = body[basePath + '[values][0][enum_code]'];
                 const finalVal = (val !== undefined && val !== null && val !== '') ? val : enumVal;
@@ -31,48 +29,34 @@ function getFieldValue(body, fieldName, isName = false) {
             }
         }
     }
-
-    // 2. Intentar buscar en formato estructurado (Por si un día Kommo lo manda bien)
-    const leadsArray = body?.leads?.status || body?.leads?.update || body?.leads?.add || [];
-    const lead = Array.isArray(leadsArray) ? leadsArray[0] : Object.values(leadsArray)[0];
-    if (lead && lead.custom_fields) {
-        const fields = Array.isArray(lead.custom_fields) ? lead.custom_fields : Object.values(lead.custom_fields);
-        const field = fields.find(f => f.name && f.name.toLowerCase().trim() === targetName);
-        if (field && field.values) {
-            const values = Array.isArray(field.values) ? field.values : Object.values(field.values);
-            if (values.length > 0) {
-                const val = values[0].value;
-                const enumVal = values[0].enum_code;
-                return (val !== undefined && val !== null && val !== '') ? val : (enumVal || 'N/A');
-            }
-        }
-    }
-
     return 'N/A';
 }
 
 module.exports = async function (req, res) {
-    console.log("=== NUEVO DISPARO DE KOMMO ===");
-    console.log("DATOS RECIBIDOS:", JSON.stringify(req.body, null, 2));
-
-    if (req.method !== 'POST') {
-        return res.status(405).json({ error: 'Method Not Allowed. Use POST.' });
-    }
+    if (req.method !== 'POST') return res.status(405).json({ error: 'Use POST.' });
 
     try {
         const body = req.body || {};
-        
-        // Verificamos si al menos viene la palabra "leads" en alguna parte del texto
         const isKommo = Object.keys(body).some(key => key.includes('leads'));
-        if (!isKommo) {
-            console.error("❌ ERROR: El payload no parece de Kommo.");
-            return res.status(400).json({ error: 'Payload irreconocible.' });
+        if (!isKommo) return res.status(400).json({ error: 'Payload irreconocible.' });
+
+        // --- 🔒 FILTRO DE COLUMNA EXACTA 🔒 ---
+        let statusId = '';
+        for (const key in body) {
+            if (key.includes('[status_id]')) {
+                statusId = body[key];
+                break;
+            }
+        }
+        
+        if (statusId && statusId !== '102588528') {
+            return res.status(200).json({ success: true, message: 'Ignorado. No está en la columna correcta.' });
         }
 
         // --- 1. EXTRACCIÓN DE DATOS ---
         const presupuestoRaw = getFieldValue(body, 'Presupuesto');
         const presupuestoNum = parseFloat(presupuestoRaw.toString().replace(/[^0-9.-]+/g, "")) || 0;
-        const direccionEntrega = getFieldValue(body, 'Dirección de entrega');
+        const direccionEntrega = getFieldValue(body, 'Dirección entrega'); 
         const tipoBano = getFieldValue(body, 'Tipo de baño');
         const cantidadSanitarios = getFieldValue(body, 'Cantidad de sanitarios');
 
@@ -82,14 +66,19 @@ module.exports = async function (req, res) {
         const codigo4 = getFieldValue(body, 'Código 4');
         const codigosBano = [codigo1, codigo2, codigo3, codigo4].filter(c => c && c !== 'N/A').join(', ') || 'Sin códigos asignados';
 
-        const contrato = getFieldValue(body, 'No. Contrato');
-        const cliente = getFieldValue(body, '', true); // Busca el nombre del cliente
+        const contrato = getFieldValue(body, 'No. contrato'); 
+        
+        // ¡Aquí extraemos el nombre principal de arriba!
+        const cliente = getFieldValue(body, '', true); 
+        
         const contactoEntrega = getFieldValue(body, 'Persona que recibe baño');
-        const telefonoEntrega = getFieldValue(body, 'Teléfono persona que recibe');
+        const telefonoEntrega = getFieldValue(body, 'Teléfono persona que recib'); 
         const periodoRenta = getFieldValue(body, 'Periodo de renta');
 
-        const notasRaw = getFieldValue(body, 'Notas / Comentarios');
-        const notas = notasRaw !== 'N/A' ? notasRaw : getFieldValue(body, 'Notas');
+        const notasRaw = getFieldValue(body, 'Notas');
+        const notas = notasRaw !== 'N/A' ? notasRaw : getFieldValue(body, 'Notas / Comentarios');
+        
+        // ¡Campos de pago!
         const metodoPago = getFieldValue(body, 'Método de pago');
         const pagaIvaRaw = getFieldValue(body, 'Paga IVA');
         const direccionPago = getFieldValue(body, 'Dirección de pago');
@@ -101,7 +90,6 @@ module.exports = async function (req, res) {
         let saludo = '';
         let costos_html = '';
         let textoSoloEfectivo = '';
-
         const formatMoney = (val) => `$${val.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
         if (isPagaIva) {
@@ -113,6 +101,7 @@ module.exports = async function (req, res) {
         } else if (!isPagaIva && isEfectivo) {
             saludo = "Hola, buen día. ¿Me podrían ayudar a realizar la siguiente c2020 y programación, por favor?";
             costos_html = `<strong>Presupuesto:</strong> ${formatMoney(presupuestoNum)}`;
+            // Si es efectivo, agregamos la Dirección de Pago justo debajo del saludo
             textoSoloEfectivo = `<p style="font-size: 16px; color: #333; margin-top: 5px;"><strong>Dirección de pago:</strong> ${direccionPago}</p>`;
         } else {
             saludo = "Hola, buen día. ¿Me podrían ayudar a realizar la siguiente programación, por favor?";
@@ -120,7 +109,7 @@ module.exports = async function (req, res) {
         }
 
         // --- 4. FORMATO DE ARCHIVOS ---
-        const documentNames = ['CSF', 'Comprobante de domicilio', 'Comprobante de pago', 'INE'];
+        const documentNames = ['CSF', 'Comprobante de domicilio', 'Comprobante de pago', 'INE', 'Cotización'];
         let enlacesDocumentos = '';
         documentNames.forEach(doc => {
             const url = getFieldValue(body, doc);
@@ -161,15 +150,10 @@ module.exports = async function (req, res) {
         </div>`;
 
         // --- 5. MICROSOFT GRAPH ---
-        if (!process.env.TENANT_ID || !process.env.CLIENT_ID || !process.env.CLIENT_SECRET || !process.env.SENDER_EMAIL) {
-            throw new Error("Missing Microsoft API environment variables.");
-        }
-
         const msalConfig = { auth: { clientId: process.env.CLIENT_ID, authority: `https://login.microsoftonline.com/${process.env.TENANT_ID}`, clientSecret: process.env.CLIENT_SECRET } };
         const cca = new ConfidentialClientApplication(msalConfig);
         const tokenResponse = await cca.acquireTokenByClientCredential({ scopes: ['https://graph.microsoft.com/.default'] });
         
-        // --- DESTINATARIOS --- (Temporalmente solo tú)
         const toRecipientsList = ["d.herrera@saniglobal.com.mx"];
 
         const sendMailParams = {
@@ -177,21 +161,13 @@ module.exports = async function (req, res) {
             saveToSentItems: 'true'
         };
 
-        const graphResponse = await fetch(`https://graph.microsoft.com/v1.0/users/${process.env.SENDER_EMAIL}/sendMail`, {
+        await fetch(`https://graph.microsoft.com/v1.0/users/${process.env.SENDER_EMAIL}/sendMail`, {
             method: 'POST', headers: { 'Authorization': `Bearer ${tokenResponse.accessToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify(sendMailParams)
         });
 
-        if (!graphResponse.ok) {
-            const errorText = await graphResponse.text();
-            console.error("❌ ERROR MICROSOFT GRAPH:", errorText);
-            throw new Error(`Graph API Status ${graphResponse.status}: ${errorText}`);
-        }
-
-        console.log("✅ ¡CORREO ENVIADO CON ÉXITO!");
-        return res.status(200).json({ success: true, message: 'Email procesado y enviado con Microsoft Graph.' });
+        return res.status(200).json({ success: true, message: 'Email procesado y enviado.' });
 
     } catch (error) {
-        console.error("❌ Webhook Falló:", error);
         return res.status(500).json({ error: 'Fallo Interno', details: error.message });
     }
 };
