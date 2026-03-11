@@ -1,25 +1,57 @@
 const { ConfidentialClientApplication } = require('@azure/msal-node');
 
-function getCustomFieldValue(customFields, fieldName) {
-    if (!customFields) return 'N/A';
-    const fields = Array.isArray(customFields) ? customFields : Object.values(customFields);
+// Función maestra: lee los datos así vengan estructurados o aplastados por Kommo
+function getFieldValue(body, fieldName, isName = false) {
+    if (isName) {
+        // Buscar el nombre del cliente
+        if (body.leads?.status?.[0]?.name) return body.leads.status[0].name;
+        if (body.leads?.update?.[0]?.name) return body.leads.update[0].name;
+        if (body.leads?.add?.[0]?.name) return body.leads.add[0].name;
+        
+        // Buscar en formato aplastado
+        for (const key in body) {
+            if (key.match(/^leads\[(status|update|add)\]\[0\]\[name\]$/)) {
+                return body[key];
+            }
+        }
+        return 'Cliente sin nombre';
+    }
+
     const targetName = fieldName.toLowerCase().trim();
-    
-    const field = fields.find(f => f.name && f.name.toLowerCase().trim() === targetName);
-    if (field && field.values) {
-        const values = Array.isArray(field.values) ? field.values : Object.values(field.values);
-        if (values.length > 0) {
-            const val = values[0].value;
-            const enumVal = values[0].enum_code;
-            const finalVal = (val !== undefined && val !== null && val !== '') ? val : enumVal;
-            return finalVal || 'N/A';
+
+    // 1. Intentar buscar en formato aplastado (El formato rebelde de Kommo)
+    for (const key in body) {
+        if (key.includes('[custom_fields]') && key.endsWith('[name]')) {
+            if (String(body[key]).toLowerCase().trim() === targetName) {
+                const basePath = key.substring(0, key.length - 6); // Quita el '[name]'
+                const val = body[basePath + '[values][0][value]'];
+                const enumVal = body[basePath + '[values][0][enum_code]'];
+                const finalVal = (val !== undefined && val !== null && val !== '') ? val : enumVal;
+                if (finalVal) return finalVal;
+            }
         }
     }
+
+    // 2. Intentar buscar en formato estructurado (Por si un día Kommo lo manda bien)
+    const leadsArray = body?.leads?.status || body?.leads?.update || body?.leads?.add || [];
+    const lead = Array.isArray(leadsArray) ? leadsArray[0] : Object.values(leadsArray)[0];
+    if (lead && lead.custom_fields) {
+        const fields = Array.isArray(lead.custom_fields) ? lead.custom_fields : Object.values(lead.custom_fields);
+        const field = fields.find(f => f.name && f.name.toLowerCase().trim() === targetName);
+        if (field && field.values) {
+            const values = Array.isArray(field.values) ? field.values : Object.values(field.values);
+            if (values.length > 0) {
+                const val = values[0].value;
+                const enumVal = values[0].enum_code;
+                return (val !== undefined && val !== null && val !== '') ? val : (enumVal || 'N/A');
+            }
+        }
+    }
+
     return 'N/A';
 }
 
 module.exports = async function (req, res) {
-    // 🚨 CÁMARA DE SEGURIDAD ACTIVADA: Vamos a ver el formato raro de Kommo 🚨
     console.log("=== NUEVO DISPARO DE KOMMO ===");
     console.log("DATOS RECIBIDOS:", JSON.stringify(req.body, null, 2));
 
@@ -28,50 +60,39 @@ module.exports = async function (req, res) {
     }
 
     try {
-        const leads = req.body?.leads;
+        const body = req.body || {};
         
-        if (!leads) {
-            console.error("❌ ERROR 400: Kommo no mandó el objeto 'leads' como esperábamos.");
-            return res.status(400).json({ 
-                error: 'Payload incorrecto: No se encontró el objeto "leads".', 
-                lo_que_mando_kommo: req.body 
-            });
+        // Verificamos si al menos viene la palabra "leads" en alguna parte del texto
+        const isKommo = Object.keys(body).some(key => key.includes('leads'));
+        if (!isKommo) {
+            console.error("❌ ERROR: El payload no parece de Kommo.");
+            return res.status(400).json({ error: 'Payload irreconocible.' });
         }
 
-        const leadEntryArray = leads.status || leads.update || leads.add;
-        if (!leadEntryArray) {
-            console.error("❌ ERROR 400: Kommo no mandó un evento válido.");
-            return res.status(400).json({ error: 'No se encontró evento válido (status, update o add).' });
-        }
-
-        const leadEntries = Array.isArray(leadEntryArray) ? leadEntryArray : Object.values(leadEntryArray);
-        const leadEntry = leadEntries[0];
-        const customFields = leadEntry.custom_fields || [];
-
-        // --- 1. EXTRACCIÓN DE DATOS (Ninguno es obligatorio) ---
-        const presupuestoRaw = getCustomFieldValue(customFields, 'Presupuesto');
+        // --- 1. EXTRACCIÓN DE DATOS ---
+        const presupuestoRaw = getFieldValue(body, 'Presupuesto');
         const presupuestoNum = parseFloat(presupuestoRaw.toString().replace(/[^0-9.-]+/g, "")) || 0;
-        const direccionEntrega = getCustomFieldValue(customFields, 'Dirección de entrega');
-        const tipoBano = getCustomFieldValue(customFields, 'Tipo de baño');
-        const cantidadSanitarios = getCustomFieldValue(customFields, 'Cantidad de sanitarios');
+        const direccionEntrega = getFieldValue(body, 'Dirección de entrega');
+        const tipoBano = getFieldValue(body, 'Tipo de baño');
+        const cantidadSanitarios = getFieldValue(body, 'Cantidad de sanitarios');
 
-        const codigo1 = getCustomFieldValue(customFields, 'Código 1');
-        const codigo2 = getCustomFieldValue(customFields, 'Código 2');
-        const codigo3 = getCustomFieldValue(customFields, 'Código 3');
-        const codigo4 = getCustomFieldValue(customFields, 'Código 4');
+        const codigo1 = getFieldValue(body, 'Código 1');
+        const codigo2 = getFieldValue(body, 'Código 2');
+        const codigo3 = getFieldValue(body, 'Código 3');
+        const codigo4 = getFieldValue(body, 'Código 4');
         const codigosBano = [codigo1, codigo2, codigo3, codigo4].filter(c => c && c !== 'N/A').join(', ') || 'Sin códigos asignados';
 
-        const contrato = getCustomFieldValue(customFields, 'No. Contrato');
-        const cliente = leadEntry.name || 'Cliente sin nombre';
-        const contactoEntrega = getCustomFieldValue(customFields, 'Persona que recibe baño');
-        const telefonoEntrega = getCustomFieldValue(customFields, 'Teléfono persona que recibe');
-        const periodoRenta = getCustomFieldValue(customFields, 'Periodo de renta');
+        const contrato = getFieldValue(body, 'No. Contrato');
+        const cliente = getFieldValue(body, '', true); // Busca el nombre del cliente
+        const contactoEntrega = getFieldValue(body, 'Persona que recibe baño');
+        const telefonoEntrega = getFieldValue(body, 'Teléfono persona que recibe');
+        const periodoRenta = getFieldValue(body, 'Periodo de renta');
 
-        const notasRaw = getCustomFieldValue(customFields, 'Notas / Comentarios');
-        const notas = notasRaw !== 'N/A' ? notasRaw : getCustomFieldValue(customFields, 'Notas');
-        const metodoPago = getCustomFieldValue(customFields, 'Método de pago');
-        const pagaIvaRaw = getCustomFieldValue(customFields, 'Paga IVA');
-        const direccionPago = getCustomFieldValue(customFields, 'Dirección de pago');
+        const notasRaw = getFieldValue(body, 'Notas / Comentarios');
+        const notas = notasRaw !== 'N/A' ? notasRaw : getFieldValue(body, 'Notas');
+        const metodoPago = getFieldValue(body, 'Método de pago');
+        const pagaIvaRaw = getFieldValue(body, 'Paga IVA');
+        const direccionPago = getFieldValue(body, 'Dirección de pago');
 
         // --- 2. LÓGICA CONDICIONAL ---
         const isPagaIva = pagaIvaRaw === true || pagaIvaRaw.toString().toLowerCase() === 'sí' || pagaIvaRaw.toString().toLowerCase() === 'si' || pagaIvaRaw === '1';
@@ -102,7 +123,7 @@ module.exports = async function (req, res) {
         const documentNames = ['CSF', 'Comprobante de domicilio', 'Comprobante de pago', 'INE'];
         let enlacesDocumentos = '';
         documentNames.forEach(doc => {
-            const url = getCustomFieldValue(customFields, doc);
+            const url = getFieldValue(body, doc);
             if (url && (url.startsWith('http') || url.startsWith('www'))) {
                 const link = url.startsWith('www') ? `https://${url}` : url;
                 enlacesDocumentos += `<li style="margin-bottom: 12px;"><a href="${link}" style="display: inline-block; padding: 10px 16px; background-color: #0078D4; color: #fff; text-decoration: none; border-radius: 6px; font-weight: bold; font-family: sans-serif;">📄 Descargar ${doc}</a></li>`;
@@ -148,7 +169,7 @@ module.exports = async function (req, res) {
         const cca = new ConfidentialClientApplication(msalConfig);
         const tokenResponse = await cca.acquireTokenByClientCredential({ scopes: ['https://graph.microsoft.com/.default'] });
         
-        // CORREOS DE PRUEBA (Dejaremos solo a d.herrera por ahora)
+        // --- DESTINATARIOS --- (Temporalmente solo tú)
         const toRecipientsList = ["d.herrera@saniglobal.com.mx"];
 
         const sendMailParams = {
@@ -174,4 +195,3 @@ module.exports = async function (req, res) {
         return res.status(500).json({ error: 'Fallo Interno', details: error.message });
     }
 };
-
