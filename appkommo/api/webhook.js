@@ -4,13 +4,11 @@ function getFieldValue(body, fieldName, isName = false) {
     if (body.fuente === 'make') {
         if (isName) return body.nombre || 'Cliente sin nombre';
         
-        // Atrapamos el presupuesto
         if (fieldName === 'Presupuesto' && body.presupuesto) return body.presupuesto;
 
         if (body.custom_fields && Array.isArray(body.custom_fields)) {
             const targetName = fieldName.toLowerCase().trim();
             
-            // Búsqueda EXACTA para que no se mezclen los campos
             const field = body.custom_fields.find(f => {
                 const n1 = (f.name || '').toLowerCase().trim();
                 const n2 = (f.field_name || '').toLowerCase().trim();
@@ -21,11 +19,10 @@ function getFieldValue(body, fieldName, isName = false) {
                 let val = field.values[0].value;
                 const enumVal = field.values[0].enum_code;
                 
-                // Extractor infalible para limpiar el nombre de los PDFs
                 const strVal = String(val);
                 if (strVal.includes('"file_name"')) {
                     const match = strVal.match(/"file_name"\s*:\s*"([^"]+)"/);
-                    if (match) return match[1]; // Solo devuelve "archivo.pdf"
+                    if (match) return match[1]; 
                 }
                 
                 const finalVal = (val !== undefined && val !== null && val !== '') ? val : enumVal;
@@ -35,7 +32,6 @@ function getFieldValue(body, fieldName, isName = false) {
         return 'N/A';
     }
 
-    // --- LÓGICA ORIGINAL ---
     if (isName) {
         if (body.leads?.status?.[0]?.name) return body.leads.status[0].name;
         if (body.leads?.update?.[0]?.name) return body.leads.update[0].name;
@@ -100,7 +96,6 @@ module.exports = async function (req, res) {
         const cliente = getFieldValue(body, '', true); 
         const contactoEntrega = getFieldValue(body, 'Persona que recibe baño');
         
-        // Corrección del teléfono para que busque ambos posibles nombres
         let telefonoEntrega = getFieldValue(body, 'Teléfono persona que recibe');
         if (telefonoEntrega === 'N/A') telefonoEntrega = getFieldValue(body, 'Teléfono persona que recib');
 
@@ -144,7 +139,6 @@ module.exports = async function (req, res) {
                 const link = url.startsWith('www') ? `https://${url}` : url;
                 enlacesDocumentos += `<li style="margin-bottom: 12px;"><a href="${link}" style="display: inline-block; padding: 10px 16px; background-color: #0078D4; color: #fff; text-decoration: none; border-radius: 6px; font-weight: bold; font-family: sans-serif;">📄 Descargar ${doc}</a></li>`;
             } else if (url && url !== 'N/A') {
-                // Modificado para que sea claro que se debe abrir en Kommo
                 enlacesDocumentos += `<li style="margin-bottom: 10px; font-family: sans-serif;">📄 <strong>${doc}:</strong> ${url} <em style="color: #666; font-size: 12px;">(Abrir archivo desde Kommo)</em></li>`;
             }
         });
@@ -180,7 +174,11 @@ module.exports = async function (req, res) {
         const cca = new ConfidentialClientApplication(msalConfig);
         const tokenResponse = await cca.acquireTokenByClientCredential({ scopes: ['https://graph.microsoft.com/.default'] });
         
-        const toRecipientsList = ["d.herrera@saniglobal.com.mx"];
+        // ✨ AQUÍ ESTÁN LOS DOS CORREOS AHORA ✨
+        const toRecipientsList = [
+            "d.herrera@saniglobal.com.mx",
+            "soporte@saniglobal.com.mx"
+        ];
 
         const sendMailParams = {
             message: { subject: `Nuevo requerimiento - Contrato ${contrato} - Cliente: ${cliente}`, body: { contentType: 'HTML', content: emailHtmlBody }, toRecipients: toRecipientsList.map(email => ({ emailAddress: { address: email } })) },
