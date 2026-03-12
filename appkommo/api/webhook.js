@@ -84,7 +84,6 @@ module.exports = async function (req, res) {
         const presupuestoRaw = getFieldValue(body, 'Presupuesto');
         const presupuestoNum = parseFloat(presupuestoRaw.toString().replace(/[^0-9.-]+/g, "")) || 0;
         
-        // ✨ Nuevo campo: Precio unitario ✨
         const precioUnitarioRaw = getFieldValue(body, 'Precio unitario');
         const precioUnitarioNum = parseFloat(precioUnitarioRaw.toString().replace(/[^0-9.-]+/g, "")) || 0;
 
@@ -122,8 +121,8 @@ module.exports = async function (req, res) {
         let textoSoloEfectivo = '';
         const formatMoney = (val) => `$${val.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-        // ✨ LÓGICA DE MULTIPLICACIÓN Y DESGLOSE ✨
-        const desgloseUnitario = `<div style="margin-bottom: 8px; font-size: 14px; color: #555;">${formatMoney(precioUnitarioNum)} x ${cantidadSanitarios} sanitario(s)</div>`;
+        // ✨ NUEVAS ETIQUETAS: Costo unitario y Costo total ✨
+        const desgloseUnitario = `<div style="margin-bottom: 8px; font-size: 14px; color: #555;"><strong>Costo unitario:</strong> ${formatMoney(precioUnitarioNum)} x ${cantidadSanitarios} sanitario(s)</div>`;
 
         if (isPagaIva) {
             saludo = "Hola, buen día. ¿Me podrían ayudar a realizar la siguiente facturación y programación, por favor?";
@@ -133,11 +132,11 @@ module.exports = async function (req, res) {
             costos_html = `${desgloseUnitario}<strong>Subtotal:</strong> ${formatMoney(subtotal)}<br/><strong>IVA (16%):</strong> ${formatMoney(iva)}<br/><strong>Total:</strong> ${formatMoney(total)}`;
         } else if (!isPagaIva && isEfectivo) {
             saludo = "Hola, buen día. ¿Me podrían ayudar a realizar la siguiente c2020 y programación, por favor?";
-            costos_html = `${desgloseUnitario}<strong>Presupuesto:</strong> ${formatMoney(presupuestoNum)}`;
+            costos_html = `${desgloseUnitario}<strong>Costo total:</strong> ${formatMoney(presupuestoNum)}`;
             textoSoloEfectivo = `<p style="font-size: 16px; color: #333; margin-top: 5px;"><strong>Dirección de pago:</strong> ${direccionPago}</p>`;
         } else {
             saludo = "Hola, buen día. ¿Me podrían ayudar a realizar la siguiente programación, por favor?";
-            costos_html = `${desgloseUnitario}<strong>Presupuesto:</strong> ${formatMoney(presupuestoNum)}`;
+            costos_html = `${desgloseUnitario}<strong>Costo total:</strong> ${formatMoney(presupuestoNum)}`;
         }
 
         const emailHtmlBody = `
