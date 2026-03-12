@@ -4,22 +4,42 @@ function getFieldValue(body, fieldName, isName = false) {
     if (body.fuente === 'make') {
         if (isName) return body.nombre || 'Cliente sin nombre';
         
+        // Atrapamos el presupuesto que viene directo
+        if (fieldName === 'Presupuesto' && body.presupuesto) return body.presupuesto;
+
         if (body.custom_fields && Array.isArray(body.custom_fields)) {
             const targetName = fieldName.toLowerCase().trim();
-            const field = body.custom_fields.find(f => 
-                (f.name && f.name.toLowerCase().trim() === targetName) || 
-                (f.field_name && f.field_name.toLowerCase().trim() === targetName)
-            );
+            
+            // Buscador Inteligente (encuentra palabras similares, ignora errores de dedo)
+            const field = body.custom_fields.find(f => {
+                const name1 = (f.name || '').toLowerCase().trim();
+                const name2 = (f.field_name || '').toLowerCase().trim();
+                return name1.includes(targetName) || name2.includes(targetName) || targetName.includes(name1);
+            });
+
             if (field && field.values && field.values.length > 0) {
-                const val = field.values[0].value;
+                let val = field.values[0].value;
                 const enumVal = field.values[0].enum_code;
+                
+                // Traductor de PDFs de Kommo
+                if (typeof val === 'string' && val.includes('file_name')) {
+                    try {
+                        const parsed = JSON.parse(val);
+                        if (parsed.file_name) return `[Ver archivo en Kommo: ${parsed.file_name}]`;
+                    } catch(e) {}
+                }
+                if (typeof val === 'object' && val !== null && val.file_name) {
+                    return `[Ver archivo en Kommo: ${val.file_name}]`;
+                }
+                
                 const finalVal = (val !== undefined && val !== null && val !== '') ? val : enumVal;
-                if (finalVal) return finalVal;
+                if (finalVal !== undefined && finalVal !== null) return finalVal;
             }
         }
         return 'N/A';
     }
 
+    // --- LÓGICA ORIGINAL ---
     if (isName) {
         if (body.leads?.status?.[0]?.name) return body.leads.status[0].name;
         if (body.leads?.update?.[0]?.name) return body.leads.update[0].name;
