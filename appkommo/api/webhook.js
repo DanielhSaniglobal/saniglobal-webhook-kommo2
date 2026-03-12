@@ -4,32 +4,28 @@ function getFieldValue(body, fieldName, isName = false) {
     if (body.fuente === 'make') {
         if (isName) return body.nombre || 'Cliente sin nombre';
         
-        // Atrapamos el presupuesto que viene directo
+        // Atrapamos el presupuesto
         if (fieldName === 'Presupuesto' && body.presupuesto) return body.presupuesto;
 
         if (body.custom_fields && Array.isArray(body.custom_fields)) {
             const targetName = fieldName.toLowerCase().trim();
             
-            // Buscador Inteligente (encuentra palabras similares, ignora errores de dedo)
+            // Búsqueda EXACTA para que no se mezclen los campos
             const field = body.custom_fields.find(f => {
-                const name1 = (f.name || '').toLowerCase().trim();
-                const name2 = (f.field_name || '').toLowerCase().trim();
-                return name1.includes(targetName) || name2.includes(targetName) || targetName.includes(name1);
+                const n1 = (f.name || '').toLowerCase().trim();
+                const n2 = (f.field_name || '').toLowerCase().trim();
+                return n1 === targetName || n2 === targetName;
             });
 
             if (field && field.values && field.values.length > 0) {
                 let val = field.values[0].value;
                 const enumVal = field.values[0].enum_code;
                 
-                // Traductor de PDFs de Kommo
-                if (typeof val === 'string' && val.includes('file_name')) {
-                    try {
-                        const parsed = JSON.parse(val);
-                        if (parsed.file_name) return `[Ver archivo en Kommo: ${parsed.file_name}]`;
-                    } catch(e) {}
-                }
-                if (typeof val === 'object' && val !== null && val.file_name) {
-                    return `[Ver archivo en Kommo: ${val.file_name}]`;
+                // Extractor infalible para limpiar el nombre de los PDFs
+                const strVal = String(val);
+                if (strVal.includes('"file_name"')) {
+                    const match = strVal.match(/"file_name"\s*:\s*"([^"]+)"/);
+                    if (match) return match[1]; // Solo devuelve "archivo.pdf"
                 }
                 
                 const finalVal = (val !== undefined && val !== null && val !== '') ? val : enumVal;
@@ -103,7 +99,11 @@ module.exports = async function (req, res) {
         const contrato = getFieldValue(body, 'No. contrato'); 
         const cliente = getFieldValue(body, '', true); 
         const contactoEntrega = getFieldValue(body, 'Persona que recibe baño');
-        const telefonoEntrega = getFieldValue(body, 'Teléfono persona que recib'); 
+        
+        // Corrección del teléfono para que busque ambos posibles nombres
+        let telefonoEntrega = getFieldValue(body, 'Teléfono persona que recibe');
+        if (telefonoEntrega === 'N/A') telefonoEntrega = getFieldValue(body, 'Teléfono persona que recib');
+
         const periodoRenta = getFieldValue(body, 'Periodo de renta');
 
         const notasRaw = getFieldValue(body, 'Notas');
@@ -144,7 +144,8 @@ module.exports = async function (req, res) {
                 const link = url.startsWith('www') ? `https://${url}` : url;
                 enlacesDocumentos += `<li style="margin-bottom: 12px;"><a href="${link}" style="display: inline-block; padding: 10px 16px; background-color: #0078D4; color: #fff; text-decoration: none; border-radius: 6px; font-weight: bold; font-family: sans-serif;">📄 Descargar ${doc}</a></li>`;
             } else if (url && url !== 'N/A') {
-                enlacesDocumentos += `<li style="margin-bottom: 10px; font-family: sans-serif;">📄 <strong>${doc}:</strong> ${url}</li>`;
+                // Modificado para que sea claro que se debe abrir en Kommo
+                enlacesDocumentos += `<li style="margin-bottom: 10px; font-family: sans-serif;">📄 <strong>${doc}:</strong> ${url} <em style="color: #666; font-size: 12px;">(Abrir archivo desde Kommo)</em></li>`;
             }
         });
 
