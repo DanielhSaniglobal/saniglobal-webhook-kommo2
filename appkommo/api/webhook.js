@@ -80,8 +80,14 @@ module.exports = async function (req, res) {
             return res.status(200).json({ success: true, message: 'Ignorado. No está en la columna correcta.' });
         }
 
+        // --- EXTRACCIÓN DE DATOS ---
         const presupuestoRaw = getFieldValue(body, 'Presupuesto');
         const presupuestoNum = parseFloat(presupuestoRaw.toString().replace(/[^0-9.-]+/g, "")) || 0;
+        
+        // ✨ Nuevo campo: Precio unitario ✨
+        const precioUnitarioRaw = getFieldValue(body, 'Precio unitario');
+        const precioUnitarioNum = parseFloat(precioUnitarioRaw.toString().replace(/[^0-9.-]+/g, "")) || 0;
+
         const direccionEntrega = getFieldValue(body, 'Dirección entrega'); 
         const tipoBano = getFieldValue(body, 'Tipo de baño');
         const cantidadSanitarios = getFieldValue(body, 'Cantidad de sanitarios');
@@ -116,35 +122,22 @@ module.exports = async function (req, res) {
         let textoSoloEfectivo = '';
         const formatMoney = (val) => `$${val.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
+        // ✨ LÓGICA DE MULTIPLICACIÓN Y DESGLOSE ✨
+        const desgloseUnitario = `<div style="margin-bottom: 8px; font-size: 14px; color: #555;">${formatMoney(precioUnitarioNum)} x ${cantidadSanitarios} sanitario(s)</div>`;
+
         if (isPagaIva) {
             saludo = "Hola, buen día. ¿Me podrían ayudar a realizar la siguiente facturación y programación, por favor?";
             const subtotal = presupuestoNum;
             const iva = subtotal * 0.16;
             const total = subtotal + iva;
-            costos_html = `<strong>Subtotal:</strong> ${formatMoney(subtotal)}<br/><strong>IVA (16%):</strong> ${formatMoney(iva)}<br/><strong>Total:</strong> ${formatMoney(total)}`;
+            costos_html = `${desgloseUnitario}<strong>Subtotal:</strong> ${formatMoney(subtotal)}<br/><strong>IVA (16%):</strong> ${formatMoney(iva)}<br/><strong>Total:</strong> ${formatMoney(total)}`;
         } else if (!isPagaIva && isEfectivo) {
             saludo = "Hola, buen día. ¿Me podrían ayudar a realizar la siguiente c2020 y programación, por favor?";
-            costos_html = `<strong>Presupuesto:</strong> ${formatMoney(presupuestoNum)}`;
+            costos_html = `${desgloseUnitario}<strong>Presupuesto:</strong> ${formatMoney(presupuestoNum)}`;
             textoSoloEfectivo = `<p style="font-size: 16px; color: #333; margin-top: 5px;"><strong>Dirección de pago:</strong> ${direccionPago}</p>`;
         } else {
             saludo = "Hola, buen día. ¿Me podrían ayudar a realizar la siguiente programación, por favor?";
-            costos_html = `<strong>Presupuesto:</strong> ${formatMoney(presupuestoNum)}`;
-        }
-
-        const documentNames = ['CSF', 'Comprobante de domicilio', 'Comprobante de pago', 'INE', 'Cotización'];
-        let enlacesDocumentos = '';
-        documentNames.forEach(doc => {
-            const url = getFieldValue(body, doc);
-            if (url && (url.startsWith('http') || url.startsWith('www'))) {
-                const link = url.startsWith('www') ? `https://${url}` : url;
-                enlacesDocumentos += `<li style="margin-bottom: 12px;"><a href="${link}" style="display: inline-block; padding: 10px 16px; background-color: #0078D4; color: #fff; text-decoration: none; border-radius: 6px; font-weight: bold; font-family: sans-serif;">📄 Descargar ${doc}</a></li>`;
-            } else if (url && url !== 'N/A') {
-                enlacesDocumentos += `<li style="margin-bottom: 10px; font-family: sans-serif;">📄 <strong>${doc}:</strong> ${url} <em style="color: #666; font-size: 12px;">(Abrir archivo desde Kommo)</em></li>`;
-            }
-        });
-
-        if (!enlacesDocumentos) {
-            enlacesDocumentos = '<li style="font-family: sans-serif;"><em>Sin documentos adjuntos encontrados.</em></li>';
+            costos_html = `${desgloseUnitario}<strong>Presupuesto:</strong> ${formatMoney(presupuestoNum)}`;
         }
 
         const emailHtmlBody = `
@@ -164,17 +157,12 @@ module.exports = async function (req, res) {
                 <tr><td colspan="2" style="background-color: #bce2f3; text-align: center; font-weight: bold; padding: 12px; border: 1px solid #ccc;">Comentarios</td></tr>
                 <tr><td colspan="2" style="padding: 15px 12px; border: 1px solid #ccc; text-align: center; white-space: pre-wrap; color: #444;">${notas}</td></tr>
             </table>
-            <div style="margin-top: 35px; border-top: 1px solid #eee; padding-top: 15px;">
-                <h3 style="color: #333; font-family: Arial, sans-serif; font-size: 18px;">Documentos del Cliente</h3>
-                <ul style="list-style-type: none; padding: 0;">${enlacesDocumentos}</ul>
-            </div>
         </div>`;
 
         const msalConfig = { auth: { clientId: process.env.CLIENT_ID, authority: `https://login.microsoftonline.com/${process.env.TENANT_ID}`, clientSecret: process.env.CLIENT_SECRET } };
         const cca = new ConfidentialClientApplication(msalConfig);
         const tokenResponse = await cca.acquireTokenByClientCredential({ scopes: ['https://graph.microsoft.com/.default'] });
         
-        // ✨ AQUÍ ESTÁN LOS DOS CORREOS AHORA ✨
         const toRecipientsList = [
             "d.herrera@saniglobal.com.mx",
             "soporte@saniglobal.com.mx"
