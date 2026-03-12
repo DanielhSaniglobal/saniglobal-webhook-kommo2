@@ -1,7 +1,6 @@
 const { ConfidentialClientApplication } = require('@azure/msal-node');
 
 function getFieldValue(body, fieldName, isName = false) {
-    // ✨ EL TRUCO HACKER PARA MAKE (Mejorado) ✨
     if (body.fuente === 'make') {
         if (isName) return body.nombre || 'Cliente sin nombre';
         
@@ -21,7 +20,6 @@ function getFieldValue(body, fieldName, isName = false) {
         return 'N/A';
     }
 
-    // --- LÓGICA ORIGINAL PARA KOMMO NATIVO ---
     if (isName) {
         if (body.leads?.status?.[0]?.name) return body.leads.status[0].name;
         if (body.leads?.update?.[0]?.name) return body.leads.update[0].name;
@@ -55,11 +53,9 @@ module.exports = async function (req, res) {
     try {
         const body = req.body || {};
         
-        // ✨ Aceptamos el payload si viene de Kommo o de Make ✨
         const isKommo = Object.keys(body).some(key => key.includes('leads')) || body.fuente === 'make';
         if (!isKommo) return res.status(400).json({ error: 'Payload irreconocible.' });
 
-        // --- 🔒 FILTRO DE COLUMNA EXACTA 🔒 ---
         let statusId = '';
         for (const key in body) {
             if (key.includes('[status_id]')) {
@@ -68,12 +64,10 @@ module.exports = async function (req, res) {
             }
         }
         
-        // Si viene de Make, saltamos el candado. Si viene de Kommo, lo aplicamos.
         if (statusId && statusId !== '102588528' && body.fuente !== 'make') {
             return res.status(200).json({ success: true, message: 'Ignorado. No está en la columna correcta.' });
         }
 
-        // --- 1. EXTRACCIÓN DE DATOS ---
         const presupuestoRaw = getFieldValue(body, 'Presupuesto');
         const presupuestoNum = parseFloat(presupuestoRaw.toString().replace(/[^0-9.-]+/g, "")) || 0;
         const direccionEntrega = getFieldValue(body, 'Dirección entrega'); 
@@ -99,7 +93,6 @@ module.exports = async function (req, res) {
         const pagaIvaRaw = getFieldValue(body, 'Paga IVA');
         const direccionPago = getFieldValue(body, 'Dirección de pago');
 
-        // --- 2. LÓGICA CONDICIONAL ---
         const isPagaIva = pagaIvaRaw === true || pagaIvaRaw.toString().toLowerCase() === 'sí' || pagaIvaRaw.toString().toLowerCase() === 'si' || pagaIvaRaw === '1';
         const isEfectivo = metodoPago.toString().toLowerCase().includes('efectivo');
 
@@ -123,7 +116,6 @@ module.exports = async function (req, res) {
             costos_html = `<strong>Presupuesto:</strong> ${formatMoney(presupuestoNum)}`;
         }
 
-        // --- 4. FORMATO DE ARCHIVOS ---
         const documentNames = ['CSF', 'Comprobante de domicilio', 'Comprobante de pago', 'INE', 'Cotización'];
         let enlacesDocumentos = '';
         documentNames.forEach(doc => {
@@ -140,7 +132,6 @@ module.exports = async function (req, res) {
             enlacesDocumentos = '<li style="font-family: sans-serif;"><em>Sin documentos adjuntos encontrados.</em></li>';
         }
 
-        // --- 3. DISEÑO HTML ---
         const emailHtmlBody = `
         <div style="font-family: Arial, sans-serif; color: #202020; max-width: 650px; margin: 0 auto; outline: 1px solid transparent;">
             <p style="font-size: 16px;">${saludo}</p>
@@ -164,20 +155,19 @@ module.exports = async function (req, res) {
             </div>
         </div>`;
 
-        // --- 5. MICROSOFT GRAPH ---
-        const msalConfig = { auth: { clientId: process.env.CLIENT_ID, authority: \`https://login.microsoftonline.com/\${process.env.TENANT_ID}\`, clientSecret: process.env.CLIENT_SECRET } };
+        const msalConfig = { auth: { clientId: process.env.CLIENT_ID, authority: `https://login.microsoftonline.com/${process.env.TENANT_ID}`, clientSecret: process.env.CLIENT_SECRET } };
         const cca = new ConfidentialClientApplication(msalConfig);
         const tokenResponse = await cca.acquireTokenByClientCredential({ scopes: ['https://graph.microsoft.com/.default'] });
         
         const toRecipientsList = ["d.herrera@saniglobal.com.mx"];
 
         const sendMailParams = {
-            message: { subject: \`Nuevo requerimiento - Contrato \${contrato} - Cliente: \${cliente}\`, body: { contentType: 'HTML', content: emailHtmlBody }, toRecipients: toRecipientsList.map(email => ({ emailAddress: { address: email } })) },
+            message: { subject: `Nuevo requerimiento - Contrato ${contrato} - Cliente: ${cliente}`, body: { contentType: 'HTML', content: emailHtmlBody }, toRecipients: toRecipientsList.map(email => ({ emailAddress: { address: email } })) },
             saveToSentItems: 'true'
         };
 
-        await fetch(\`https://graph.microsoft.com/v1.0/users/\${process.env.SENDER_EMAIL}/sendMail\`, {
-            method: 'POST', headers: { 'Authorization': \`Bearer \${tokenResponse.accessToken}\`, 'Content-Type': 'application/json' }, body: JSON.stringify(sendMailParams)
+        await fetch(`https://graph.microsoft.com/v1.0/users/${process.env.SENDER_EMAIL}/sendMail`, {
+            method: 'POST', headers: { 'Authorization': `Bearer ${tokenResponse.accessToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify(sendMailParams)
         });
 
         return res.status(200).json({ success: true, message: 'Email procesado y enviado.' });
