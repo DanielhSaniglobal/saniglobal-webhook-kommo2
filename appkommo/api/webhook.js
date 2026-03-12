@@ -1,23 +1,39 @@
 const { ConfidentialClientApplication } = require('@azure/msal-node');
 
 function getFieldValue(body, fieldName, isName = false) {
+    // ✨ EL TRUCO HACKER PARA MAKE ✨
+    if (body.fuente === 'make') {
+        if (isName) return body.nombre || 'Cliente sin nombre';
+        
+        if (body.custom_fields && Array.isArray(body.custom_fields)) {
+            const targetName = fieldName.toLowerCase().trim();
+            const field = body.custom_fields.find(f => 
+                f.name && f.name.toLowerCase().trim() === targetName
+            );
+            if (field && field.values && field.values.length > 0) {
+                const val = field.values[0].value;
+                const enumVal = field.values[0].enum_code;
+                const finalVal = (val !== undefined && val !== null && val !== '') ? val : enumVal;
+                if (finalVal) return finalVal;
+            }
+        }
+        return 'N/A';
+    }
+
+    // --- LÓGICA ORIGINAL PARA KOMMO NATIVO ---
     if (isName) {
-        // Aquí jalamos el nombre principal del cliente (Desde arriba de la tarjeta)
         if (body.leads?.status?.[0]?.name) return body.leads.status[0].name;
         if (body.leads?.update?.[0]?.name) return body.leads.update[0].name;
         if (body.leads?.add?.[0]?.name) return body.leads.add[0].name;
         
         for (const key in body) {
-            // Busca el título principal del Lead en formato aplastado
             if (key.match(/^leads\[(status|update|add)\]\[0\]\[name\]$/)) return body[key];
-            // Por si acaso Kommo lo manda como contacto asociado
             if (key.match(/^contacts\[(add|update)\]\[0\]\[name\]$/)) return body[key];
         }
         return 'Cliente sin nombre';
     }
 
     const targetName = fieldName.toLowerCase().trim();
-
     for (const key in body) {
         if (key.includes('[custom_fields]') && key.endsWith('[name]')) {
             if (String(body[key]).toLowerCase().trim() === targetName) {
@@ -37,7 +53,9 @@ module.exports = async function (req, res) {
 
     try {
         const body = req.body || {};
-        const isKommo = Object.keys(body).some(key => key.includes('leads'));
+        
+        // ✨ Aceptamos el payload si viene de Kommo o de Make ✨
+        const isKommo = Object.keys(body).some(key => key.includes('leads')) || body.fuente === 'make';
         if (!isKommo) return res.status(400).json({ error: 'Payload irreconocible.' });
 
         // --- 🔒 FILTRO DE COLUMNA EXACTA 🔒 ---
@@ -49,7 +67,8 @@ module.exports = async function (req, res) {
             }
         }
         
-        if (statusId && statusId !== '102588528') {
+        // Si viene de Make, saltamos el candado. Si viene de Kommo, lo aplicamos.
+        if (statusId && statusId !== '102588528' && body.fuente !== 'make') {
             return res.status(200).json({ success: true, message: 'Ignorado. No está en la columna correcta.' });
         }
 
@@ -67,10 +86,7 @@ module.exports = async function (req, res) {
         const codigosBano = [codigo1, codigo2, codigo3, codigo4].filter(c => c && c !== 'N/A').join(', ') || 'Sin códigos asignados';
 
         const contrato = getFieldValue(body, 'No. contrato'); 
-        
-        // ¡Aquí extraemos el nombre principal de arriba!
         const cliente = getFieldValue(body, '', true); 
-        
         const contactoEntrega = getFieldValue(body, 'Persona que recibe baño');
         const telefonoEntrega = getFieldValue(body, 'Teléfono persona que recib'); 
         const periodoRenta = getFieldValue(body, 'Periodo de renta');
@@ -78,7 +94,6 @@ module.exports = async function (req, res) {
         const notasRaw = getFieldValue(body, 'Notas');
         const notas = notasRaw !== 'N/A' ? notasRaw : getFieldValue(body, 'Notas / Comentarios');
         
-        // ¡Campos de pago!
         const metodoPago = getFieldValue(body, 'Método de pago');
         const pagaIvaRaw = getFieldValue(body, 'Paga IVA');
         const direccionPago = getFieldValue(body, 'Dirección de pago');
@@ -101,7 +116,6 @@ module.exports = async function (req, res) {
         } else if (!isPagaIva && isEfectivo) {
             saludo = "Hola, buen día. ¿Me podrían ayudar a realizar la siguiente c2020 y programación, por favor?";
             costos_html = `<strong>Presupuesto:</strong> ${formatMoney(presupuestoNum)}`;
-            // Si es efectivo, agregamos la Dirección de Pago justo debajo del saludo
             textoSoloEfectivo = `<p style="font-size: 16px; color: #333; margin-top: 5px;"><strong>Dirección de pago:</strong> ${direccionPago}</p>`;
         } else {
             saludo = "Hola, buen día. ¿Me podrían ayudar a realizar la siguiente programación, por favor?";
