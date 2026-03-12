@@ -1,14 +1,15 @@
 const { ConfidentialClientApplication } = require('@azure/msal-node');
 
 function getFieldValue(body, fieldName, isName = false) {
-    // ✨ EL TRUCO HACKER PARA MAKE ✨
+    // ✨ EL TRUCO HACKER PARA MAKE (Mejorado) ✨
     if (body.fuente === 'make') {
         if (isName) return body.nombre || 'Cliente sin nombre';
         
         if (body.custom_fields && Array.isArray(body.custom_fields)) {
             const targetName = fieldName.toLowerCase().trim();
             const field = body.custom_fields.find(f => 
-                f.name && f.name.toLowerCase().trim() === targetName
+                (f.name && f.name.toLowerCase().trim() === targetName) || 
+                (f.field_name && f.field_name.toLowerCase().trim() === targetName)
             );
             if (field && field.values && field.values.length > 0) {
                 const val = field.values[0].value;
@@ -164,19 +165,19 @@ module.exports = async function (req, res) {
         </div>`;
 
         // --- 5. MICROSOFT GRAPH ---
-        const msalConfig = { auth: { clientId: process.env.CLIENT_ID, authority: `https://login.microsoftonline.com/${process.env.TENANT_ID}`, clientSecret: process.env.CLIENT_SECRET } };
+        const msalConfig = { auth: { clientId: process.env.CLIENT_ID, authority: \`https://login.microsoftonline.com/\${process.env.TENANT_ID}\`, clientSecret: process.env.CLIENT_SECRET } };
         const cca = new ConfidentialClientApplication(msalConfig);
         const tokenResponse = await cca.acquireTokenByClientCredential({ scopes: ['https://graph.microsoft.com/.default'] });
         
         const toRecipientsList = ["d.herrera@saniglobal.com.mx"];
 
         const sendMailParams = {
-            message: { subject: `Nuevo requerimiento - Contrato ${contrato} - Cliente: ${cliente}`, body: { contentType: 'HTML', content: emailHtmlBody }, toRecipients: toRecipientsList.map(email => ({ emailAddress: { address: email } })) },
+            message: { subject: \`Nuevo requerimiento - Contrato \${contrato} - Cliente: \${cliente}\`, body: { contentType: 'HTML', content: emailHtmlBody }, toRecipients: toRecipientsList.map(email => ({ emailAddress: { address: email } })) },
             saveToSentItems: 'true'
         };
 
-        await fetch(`https://graph.microsoft.com/v1.0/users/${process.env.SENDER_EMAIL}/sendMail`, {
-            method: 'POST', headers: { 'Authorization': `Bearer ${tokenResponse.accessToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify(sendMailParams)
+        await fetch(\`https://graph.microsoft.com/v1.0/users/\${process.env.SENDER_EMAIL}/sendMail\`, {
+            method: 'POST', headers: { 'Authorization': \`Bearer \${tokenResponse.accessToken}\`, 'Content-Type': 'application/json' }, body: JSON.stringify(sendMailParams)
         });
 
         return res.status(200).json({ success: true, message: 'Email procesado y enviado.' });
